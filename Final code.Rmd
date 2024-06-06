@@ -1,0 +1,995 @@
+---
+title: "FINALCODE"
+author: "MEZIANE AHMED YACINE"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r} setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Checking the R version
+```{r}
+RStudio.Version()
+```
+## Les Packages
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(tidyselect)
+library(MLmetrics)
+library(lightgbm)
+library(data.table)
+library(moments)
+library(moments)
+library(MLmetrics)
+library(ggthemes)
+library(ggmosaic)
+library(gridExtra)
+library(repr)
+library(data.table)
+library(fastDummies)
+library(tictoc)
+library(naniar)
+library(DataExplorer)
+library(lubridate)
+library(patchwork)
+library(corrplot)
+library(kableExtra)
+library(themis)
+library(doParallel)
+options(warn=-1)
+options(scipen = 99)
+```
+
+##Upload Data
+```{r}
+train_iden <- read_csv("/Users/macmo/Desktop/Mémoire/Base de donnée/ieee-fraud-detection/train_identity.csv")
+train_trans <- read_csv("/Users/macmo/Desktop/Mémoire/Base de donnée/ieee-fraud-detection/train_transaction.csv")
+```
+#creating full data
+```{r}
+data<- train_trans  %>% 
+  left_join(train_iden,by="TransactionID")
+rm(train_iden,train_trans)
+```
+#checking the target variable
+```{r}
+summary(data$isFraud)
+```
+#Summary data
+```{r}
+num_observations <- nrow(data)
+num_variables <- length(data)
+num_numerical <- sum(sapply(data, is.numeric))
+num_non_numerical <- num_variables - num_numerical
+
+data.frame(
+  Category = c("Nombre de Observations", "Nombre de Variables", "Nombre de Variables numérique", "Nombre de variable non numérique⁄"),
+  Count = c(num_observations, num_variables, num_numerical, num_non_numerical)
+)
+```
+#
+```{r}
+data %>%
+  head()
+```
+#
+```{r}
+fraud0 <- sum(data$isFraud == 0)
+
+fraud1 <- sum(data$isFraud == 1)
+
+total_count <- nrow(data)
+
+data.frame(
+  Category = c("Les transaction légitimes", "Les transactions frauduleuses","Nombre totale de transactions" ),
+  Count = c(fraud0, fraud1, total_count))
+
+```
+# Plot the class of isFraud
+```{r}
+ggplot(data = data, aes(x = factor(isFraud), fill = factor(isFraud))) +
+  geom_bar(aes(y = (..count..)/sum(..count..)),position = "dodge",alpha=0.7) + 
+  geom_text(aes(y = (..count..)/sum(..count..), 
+                label = paste0(..count..," ","  (",round(prop.table(..count..) * 100,2), '%',")")), 
+            stat = 'count', 
+            position = position_dodge(.9), 
+            size=2.5,vjust = -0.3) + 
+  scale_fill_manual("",values=c("#ADD8E6","#FFA07A"),labels=c("No Fraud","Fraud")) +
+  labs(x = "", y = '') +
+  scale_y_continuous(labels = scales::percent) +
+  theme(legend.position = "bottom", 
+        axis.text=element_blank(),
+        axis.ticks = element_blank())
+
+ggplot(data = Train_data1, aes(x = factor(isFraud), fill = factor(isFraud))) +
+  geom_bar(aes(y = (..count..)/sum(..count..)),position = "dodge",alpha=0.7) + 
+  geom_text(aes(y = (..count..)/sum(..count..), 
+                label = paste0(..count..," ","  (",round(prop.table(..count..) * 100,2), '%',")")), 
+            stat = 'count', 
+            position = position_dodge(.9), 
+            size=2.5,vjust = -0.3) + 
+  scale_fill_manual("",values=c("#ADD8E6","#FFA07A"),labels=c("No Fraud","Fraud")) +
+  labs(x = "", y = '') +
+  scale_y_continuous(labels = scales::percent) +
+  theme(legend.position = "bottom", 
+        axis.text=element_blank(),
+        axis.ticks = element_blank())
+
+
+```
+#Analyse univariate
+#Variable non numérique
+##Pourcentage de valeur manquante
+```{r}
+list_char <- names(data)[sapply(data, is.character)]
+data$addr1
+list_char
+n_mode <- function(x, data){
+  list <- data[,x]
+  NROW(unique(list))
+}
+
+perc_na <- function(x, data){
+  list <- data[,x]
+  sum(is.na(list)/NROW(list))
+}
+
+percna <- sapply(list_char, perc_na, data)
+nmode <- sapply(list_char, n_mode, data)
+
+na_count <- data.frame(list_char, percna, nmode)
+
+na_count %>%
+  mutate(list_char = fct_reorder(list_char, percna)) %>%
+  ggplot(aes(list_char, percna, fill = pourcentage)) +
+  geom_col() +
+  coord_flip() +
+  labs(title = "le pourcentage des valeurs manquantes",
+       x = "variable",
+       y = "proportion")
+```
+#
+```{r}
+na_count %>%
+  mutate(list_char = fct_reorder(list_char, nmode)) %>%
+  ggplot(aes(list_char, nmode, fill = nmode, label = nmode)) +
+  geom_col(alpha = 0.5) +
+  geom_text(color = "white", position = position_stack(vjust = 0.5)) +
+  scale_y_log10(limits = c(1, 100000), labels = comma)+
+  coord_flip() +
+  labs(title = "Number of mode",
+     subtitle = "per categorical variable",
+     x = "variable",
+     y = "log of number")
+```
+#ProductCD
+#Table
+```{r}
+table(data$ProductCD)
+```
+#Le graphique
+```{r}
+ggplot(data, aes(x = ProductCD)) +
+  geom_bar(fill = "skyblue", color = "black") +
+  labs(title = "Distribution of Product Codes",
+       x = "Product Code",
+       y = "Frequency")
+```
+#Card4
+#summary for card4
+```{r}
+summary(data$card4)
+```
+#Le graphique
+```{r}
+ggplot(data, aes(x = card4)) +
+  geom_bar(fill = "darkred", color = "grey") +
+  labs(title = "Distribution of card4",
+       x = "card4",
+       y = "Frequency")
+```
+#Card6
+#summary for card6
+```{r}
+summary(data$card6)
+```
+#le garphique
+```{r}
+ggplot(data, aes(x = card6)) +
+  geom_bar(fill = "lightgreen", color = "grey") +
+  labs(title = "Distribution of card6",
+       x = "card6",
+       y = "Frequency")
+```
+#M1-M9
+```{r}
+bar_plots <- list()
+
+for (i in 1:9) {
+  var_name <- paste0("M", i)
+  p <- ggplot(data, aes(x = !!sym(var_name))) +
+    geom_bar(fill = "skyblue", color = "black") +
+    labs(title = paste("Distribution of", var_name),
+         x = var_name,
+         y = "Frequency")
+  bar_plots[[i]] <- p
+}
+wrap_plots(bar_plots)
+```
+#P_emaildomain
+#Le graphique
+```{r}
+ggplot(data, aes(x = P_emaildomain)) +
+  geom_bar(fill="skyblue", color = "skyblue") +
+  labs(title = "Distribution des adresses e-mail",
+       x = "Adresse e-mail",
+       y = "Fréquence") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  coord_flip()
+```
+#R_emaildomain
+```{r}
+ggplot(data, aes(x = R_emaildomain)) +
+  geom_bar(fill="skyblue" ,color = "skyblue") +
+  labs(title = "Distribution des adresses e-mail",
+       x = "Adresse e-mail",
+       y = "Fréquence") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+#DeviceType
+```{r}
+ggplot(data, aes(x = DeviceType)) +
+  geom_bar(fill="skyblue" ,color = "skyblue") +
+  labs(title = "Distribution des DeviceType",
+       x = "DeviceType",
+       y = "Fréquence") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+#id12 to id38
+#Le graphique
+```{r}
+subset_data <- data[, paste0("id_", 12:20)] 
+bar_plots <- list()
+for (i in 1:ncol(subset_data)) {
+  var_name <- colnames(subset_data)[i]
+  p <- ggplot(subset_data, aes_string(x = var_name)) +
+    geom_bar(fill = "skyblue", color = "black") +
+    labs(title = paste("Distribution of", var_name),
+         x = var_name,
+         y = "Frequency") +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+  bar_plots[[i]] <- p
+}
+wrap_plots(bar_plots)
+```
+### Les variables numérique
+##Know what are the numerical variables
+```{r}
+numerical_vars <- data %>% select_if(is.numeric) %>% names()
+print("Numerical variables:")
+print(numerical_vars)
+```
+##Pourcentage de NA dans les données numériques
+```{r}
+missing_percentage <- sapply(data, function(x) {
+  if(is.numeric(x)) {
+    sum(is.na(x)) / length(x) * 100
+  } else {
+    NA
+  }
+})
+
+missing_percentage[!is.na(missing_percentage)]
+```
+###TransactionDT
+##Creating the new Realdatatime
+```{r}
+reference_date <- as.POSIXct("2017-12-01 00:00:00", tz = "UTC")
+
+timedelta <- as.difftime(data$TransactionDT, units = "secs")
+
+real_datetime <- reference_date + timedelta
+
+data$real_datetime <- real_datetime
+```
+#Date (Trying to understand the whole thing)
+```{r}
+library(lubridate)
+train_dt <- data$real_datetime
+unique(wday(train_dt))
+```
+#Week
+```{r}
+unique(week(train_dt))
+```
+#
+```{r}
+data$date <- train_dt
+data$day <- wday(train_dt)
+data$week <- week(train_dt)
+data$hour <- hour(train_dt)
+```
+##summary for TransactionDT
+```{r}
+summary(data$day)
+summary(data$week)
+summary(data$hour)
+```
+#Graph de distribution de la variable TransactionDT
+```{r}
+ggplot(data, aes(x = real_datetime)) +
+  geom_histogram(binwidth = 30, fill = 'blue', color = 'SKYBLUE') +
+  labs(x = "Real Datetime", y = "Frequency", title = "Histogram of Real Datetime")
+```
+##TransactionAMT
+#Summary for TransactionAMT
+```{r}
+summary(data$TransactionAmt)
+```
+#Le graphique
+```{r}
+ggplot(data, aes(x = TransactionAmt)) +
+  geom_histogram(binwidth = 30, fill = 'blue', color = 'skyblue') +
+  labs(x = "TransactionAMT", y = "Frequency", title = "Histogram of TransactionAMT")
+```
+##Addr1 et Addr2
+#Summary for Addr1
+```{r}
+summary(data$addr1)
+```
+#Summary for Addr2
+```{r}
+summary(data$addr2)
+```
+#Le graphique de Addr1 et Addr2
+```{r}
+bar_plots1 <- list()
+for (i in 1:2) {
+  var_name1 <- paste0("addr", i)
+  p1 <- ggplot(data, aes(x = !!sym(var_name1))) +
+    geom_bar(fill = "darkred", color = "lightgreen") +
+    labs(title = paste("Distribution of", var_name1),
+         x = var_name1,
+         y = "Frequency")
+  bar_plots1[[i]] <- p1  
+}
+
+bar_plots1[[1]] + bar_plots1[[2]]
+```
+##Card1
+#Summary for card1
+```{r}
+summary(data$card1)
+```
+#le graphique de card1
+```{r}
+ggplot(data, aes(x = card1)) +
+  geom_bar(fill = "skyblue", color = "skyblue") +
+  labs(title = "Distribution of card1",
+       x = "card1",
+       y = "Frequency")
+```
+##Card2
+#Summary for card2
+```{r}
+summary(data$card2)
+```
+#Le graphique card2
+```{r}
+ggplot(data, aes(x = card2)) +
+  geom_bar(fill = "skyblue", color = "darkgreen") +
+  labs(title = "Distribution of card2",
+       x = "card2",
+       y = "Frequency")
+```
+##Card3
+#Summary for Card3
+```{r}
+summary(data$card3)
+```
+#Le graphique card3
+```{r}
+ggplot(data, aes(x = card3)) +
+  geom_bar(fill = "skyblue", color = "darkred") +
+  labs(title = "Distribution of card3",
+       x = "card3",
+       y = "Frequency")
+```
+##Card5
+#Summary for card5
+```{r}
+summary(data$card5)
+```
+#Le graphique card5
+```{r}
+ggplot(data, aes(x = card5)) +
+  geom_bar(fill = "lightgreen", color = "grey") +
+  labs(title = "Distribution of card5",
+       x = "card5",
+       y = "Frequency")
+```
+##Dist1
+#summary for Dist1
+```{r}
+summary(data$dist1)
+```
+##Dist2
+#summary for Dist2
+```{r}
+summary(data$dist2)
+```
+##C1-C14
+```{r}
+summary_C1 <- summary(data$C1)
+summary_C2 <- summary(data$C2)
+summary_C3 <- summary(data$C3)
+summary_C4 <- summary(data$C4)
+summary_C5 <- summary(data$C5)
+summary_C6 <- summary(data$C6)
+summary_C7 <- summary(data$C7)
+summary_C8 <- summary(data$C8)
+summary_C9 <- summary(data$C9)
+summary_C10 <- summary(data$C10)
+summary_C11 <- summary(data$C11)
+summary_C12 <- summary(data$C12)
+summary_C13 <- summary(data$C13)
+summary_C14 <- summary(data$C14)
+variable_names <- paste0("C", 1:14)
+summary_table <- bind_rows(
+  summary_C1,
+  summary_C2,
+  summary_C3,
+  summary_C4,
+  summary_C5,
+  summary_C6,
+  summary_C7,
+  summary_C8,
+  summary_C9,
+  summary_C10,
+  summary_C11,
+  summary_C12,
+  summary_C13,
+  summary_C14,
+  .id = "Variable"
+)
+cbind(variable = variable_names, summary_table)
+```
+#le graphique C1-C14
+```{r}
+bar_plots2 <- list()
+for (i in 1:14) {
+  var_name <- paste0("C", i)
+  p <- ggplot(data, aes(x = !!sym(var_name))) +
+    geom_bar(fill = "skyblue", color = "black") +
+    labs(title = paste("Distribution of", var_name),
+         x = var_name,
+         y = "Frequency")
+  bar_plots2[[i]] <- p
+}
+wrap_plots(bar_plots2)
+```
+##D1-D15
+#Summary for D1-D15
+```{r}
+summary_D1 <- summary(data$D1)
+summary_D2 <- summary(data$D2)
+summary_D3 <- summary(data$D3)
+summary_D4 <- summary(data$D4)
+summary_D5 <- summary(data$D5)
+summary_D6 <- summary(data$D6)
+summary_D7 <- summary(data$D7)
+summary_D8 <- summary(data$D8)
+summary_D9 <- summary(data$D9)
+summary_D10 <- summary(data$D10)
+summary_D11 <- summary(data$D11)
+summary_D12 <- summary(data$D12)
+summary_D13 <- summary(data$D13)
+summary_D14 <- summary(data$D14)
+summary_D15 <- summary(data$D15)
+variable_names1 <- paste0("D", 1:15)
+summary_table1 <- bind_rows(
+  summary_D1,
+  summary_D2,
+  summary_D3,
+  summary_D4,
+  summary_D5,
+  summary_D6,
+  summary_D7,
+  summary_D8,
+  summary_D9,
+  summary_D10,
+  summary_D11,
+  summary_D12,
+  summary_D13,
+  summary_D14,
+  summary_D15,
+  .id = "Variable"
+)
+cbind(variable = variable_names1, summary_table1)
+```
+#Le graphique for D1-D15
+```{r}
+bar_plots3 <- list()
+for (i in 1:15) {
+  var_name <- paste0("D", i)
+  p <- ggplot(data, aes(x = !!sym(var_name))) +
+    geom_bar(fill = "skyblue", color = "black") +
+    labs(title = paste("Distribution of", var_name),
+         x = var_name,
+         y = "Frequency")
+  bar_plots3[[i]] <- p
+}
+wrap_plots(bar_plots3)
+```
+##id_01-id_11
+#Summary for id_01-id_11
+```{r}
+data$id
+summary_iD1 <- summary(data$id_01)
+summary_iD2 <- summary(data$id_02)
+summary_iD3 <- summary(data$id_03)
+summary_iD4 <- summary(data$id_04)
+summary_iD5 <- summary(data$id_05)
+summary_iD6 <- summary(data$id_06)
+summary_iD7 <- summary(data$id_07)
+summary_iD8 <- summary(data$id_08)
+summary_iD9 <- summary(data$id_09)
+summary_iD10 <- summary(data$id_10)
+summary_iD11 <- summary(data$id_11)
+variable_names2 <- paste0("id_", 1:11)
+summary_table2 <- bind_rows(
+  summary_iD1,
+  summary_iD2,
+  summary_iD3,
+  summary_iD4,
+  summary_iD5,
+  summary_iD6,
+  summary_iD7,
+  summary_iD8,
+  summary_iD9,
+  summary_iD10,
+  summary_iD11,
+  .id = "Variable"
+)
+cbind(variable = variable_names2, summary_table2)
+```
+#Le graphique id_01-id_11
+```{r}
+library(ggplot2)
+bar_plots4 <- list()
+for (i in 1:11) {  
+  var_name <- sprintf("id_%02d", i)
+  p <- ggplot(data, aes(x = !!sym(var_name))) +
+    geom_bar(fill = "skyblue", color = "skyblue") +
+    labs(title = paste("Distribution of", var_name),
+         x = var_name,
+         y = "Frequency")
+  bar_plots4[[i]] <- p
+}
+
+wrap_plots(bar_plots4)
+```
+###Analyse bivariée
+## understand and remove variables with more than 50% of missing values
+```{r}
+missing_rate <- colMeans(is.na(data))
+missing_rate %>% sort(decreasing=T) %>% head(20) %>% print
+vars_to_remove <- names(missing_rate[missing_rate > 0.50])
+data1 <- data %>% select(-all_of(vars_to_remove))
+```
+
+##now we move to the understanding of the relation between the variables and the la variable cible
+##Les variables quantitatives
+#La relation between TransactionDT et la variable cible
+```{r}
+a1  <- ggplot(data1, aes(real_datetime, fill = factor(isFraud))) + geom_histogram(alpha = 0.7, bins = 30)  + theme_minimal() +
+    ggtitle("TransactionDT variable") + labs(x = "TransactionDT") + theme(legend.position = "bottom")
+a1
+```
+# Le graphique radiale de relation
+```{r}
+data1 %>%
+  ggplot(aes((hour+1))) +
+  geom_histogram(aes(y = ..density.., fill = as.factor(isFraud), color =as.factor(isFraud)), alpha = 0.4, breaks = seq(0, 24), position = "identity") + 
+  scale_x_continuous("", limits = c(0, 24), breaks = seq(0, 24)) + 
+  coord_polar()
+```
+# La realtion between TransactionAMT et la variable cible
+```{r}
+options(repr.plot.width = 5, repr.plot.height = 3)
+a1 <- ggplot(data1, aes(TransactionAmt, fill = factor(isFraud))) + geom_histogram()
+data1$amt_log  <- log10(data1$TransactionAmt)
+a1 <- ggplot(data1, aes(amt_log, fill = factor(isFraud))) + geom_histogram() + ggtitle("data")
+options(repr.plot.width = 10, repr.plot.height = 3)
+a1
+```
+#La relation between card1 et la variable cible
+```{r}
+p1 <- options(repr.plot.width = 4, repr.plot.height = 3) +
+ggplot(data1, aes(card1, fill = factor(isFraud))) + geom_histogram(alpha = 0.7, position = 'fill', bins = 50) +
+geom_hline(yintercept = 0.035, colour="black", linetype="dashed") + coord_cartesian( ylim = c(0, 0.1))
+```
+#La relation between card2 et la variable cible
+```{r}
+p2 <- options(repr.plot.width = 4, repr.plot.height = 3) +
+ggplot(data1, aes(card2, fill = factor(isFraud))) + geom_histogram(alpha = 0.7, position = 'fill', bins = 50) +
+geom_hline(yintercept = 0.035, colour="black", linetype="dashed") + coord_cartesian( ylim = c(0, 0.2))
+```
+#La realtion between card3 et la variable cible
+```{r}
+p3 <- options(repr.plot.width = 4, repr.plot.height = 3) +
+ggplot(data1, aes(card3, fill = factor(isFraud))) + geom_histogram(alpha = 0.7, position = 'fill', bins = 50) +
+geom_hline(yintercept = 0.035, colour="black", linetype="dashed") + coord_cartesian( ylim = c(0, 0.2))
+```
+#La relation between card5 et la variable cible
+```{r}
+p5 <- options(repr.plot.width = 4, repr.plot.height = 3) +
+ggplot(data1, aes(card5, fill = factor(isFraud))) + geom_histogram(alpha = 0.7, position = 'fill', bins = 50) +
+geom_hline(yintercept = 0.035, colour="black", linetype="dashed") + coord_cartesian( ylim = c(0, 0.2))
+```
+## all graphs 
+```{r}
+data1 %>%
+  select(isFraud, card1, card2, card3, card5) %>%
+  gather(column, value, -isFraud) %>%
+  filter(value > 0) %>%  
+  ggplot() +
+  geom_density(aes(value, color = as.factor(isFraud), fill = as.factor(isFraud)), alpha = 0.5) +
+  scale_x_log10() +
+  facet_wrap(~column, scales = "free") +
+  labs(title = "la densité des variables card1, card2, card3 et card5 vs Fraud / légitime",
+       x = "valeurs",
+       y = "Densité")
+```
+
+
+
+#La relation entre D1 D3 D4 D10 D15 et la variable cible
+```{r}
+data1 %>%
+  select(isFraud, D1, D3, D4, D10, D15) %>%
+  gather(column, value, -isFraud) %>%
+  filter(value > 0) %>%  
+  ggplot() +
+  geom_density(aes(value, color = as.factor(isFraud), fill = as.factor(isFraud)), alpha = 0.5) +
+  scale_x_log10() +
+  facet_wrap(~column, scales = "free") +
+  labs(title = "Density for D1, D3, D4, D10, and D15 vs Fraud / Legit",
+       subtitle = "Value <= 0 removed for log scale",
+       x = "values",
+       y = "Density")
+```
+
+##Les variables qualitatives
+#La relation between ProductCD et la variable cible
+#put plot caterogical
+```{r}
+plot_categorical <- function(df, var){
+  df %>%
+    dplyr::filter(column == var) %>%
+    dplyr::group_by(value, isFraud) %>%
+    dplyr::summarize(tot = n()) %>%
+    ggplot2::ggplot(aes(x = value, y = tot, fill = value)) +
+    ggplot2::geom_col(alpha = 0.3, position = "identity") +
+    ggplot2::facet_wrap(~isFraud, scales = "free") +
+    ggplot2::labs(title = paste0(var, " vs Fraud / Legit"),
+                  x = "Value",
+                  y = "Number of Transactions") +
+    ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 60, hjust = 1))
+}
+```
+#Le graphique
+```{r}
+Pcd_ana <- data1 %>%
+  select(isFraud, ProductCD) %>%
+  gather(column, value, -isFraud)
+
+print(plot_categorical(Pcd_ana, "ProductCD"))
+```
+#La relation between card4 & card6 et la variable cible
+```{r}
+card_ana <- data1 %>%
+  select(isFraud, card1:card6) %>%
+  tidyr::gather(column, value, -isFraud)
+
+for(var in c("card4", "card6")){
+  print(plot_categorical(card_ana, var))
+}
+```
+#La relation entre Addr1 et la variable cible
+```{r}
+data1 %>%
+  select(isFraud, addr1) %>%
+  gather(column, value, -isFraud) %>%
+  filter(value > 0) %>%  
+  ggplot() +
+  geom_density(aes(value, color = as.factor(isFraud), fill = as.factor(isFraud)), alpha = 0.5) +
+  scale_x_log10() +
+  facet_wrap(~column, scales = "free")+
+  labs(title = "Density for addr1 vs Fraud / Legit",
+       subtitle = "Value <= 0 removed for log scale",
+       x = "values",
+       y = "Density")
+```
+#La relation entre addr2 et la variable cible
+```{r}
+data1 %>%
+  select(isFraud, addr2) %>%
+  gather(column, value, -isFraud) %>%
+  filter(value > 0) %>%  
+  ggplot() +
+  geom_density(aes(value, color = as.factor(isFraud), fill = as.factor(isFraud)), alpha = 0.5) +
+  scale_x_log10() +
+  facet_wrap(~column, scales = "free")+
+  labs(title = "Density for addr2 vs Fraud / Legit",
+       subtitle = "Value <= 0 removed for log scale",
+       x = "values",
+       y = "Density")
+```
+#La relation entre la variable M4 et la variable cible
+```{r}
+M_ana <- data1 %>%
+  select(isFraud, M4) %>%
+  tidyr::gather(column, value, -isFraud)
+
+for(var in c("M4")){
+  print(plot_categorical(M_ana, var))
+}
+```
+#La relation entre la variable M6 et la variable cible
+```{r}
+M_ana <- data1 %>%
+  select(isFraud, M6) %>%
+  tidyr::gather(column, value, -isFraud)
+
+for(var in c("M6")){
+  print(plot_categorical(M_ana, var))
+}
+```
+#La relation between P-emaildomain et la variable cible
+```{r}
+PDomain_ana <- data1 %>%
+  select(isFraud,P_emaildomain ) %>%
+  gather(column, value, -isFraud)
+
+my_colors <- c("#FF9999", "#66CC99")
+
+ggplot(PDomain_ana, aes(x = value, fill = factor(isFraud))) +
+  geom_bar(position = "dodge") +
+  labs(title = "Count Plot for domain features",
+       x = "Domain Features",
+       y = "Count") +
+  scale_fill_manual(values = my_colors) + 
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+#La reltion entre C1-C14 avec la variable cible
+```{r}
+data1 %>%
+  select(isFraud, C1:C14) %>%
+  gather(column, value, -isFraud) %>%
+  filter(value > 0) %>%  
+  ggplot() +
+  geom_density(aes(value, color = as.factor(isFraud), fill = as.factor(isFraud)), alpha = 0.5) +
+  scale_x_log10() +
+  facet_wrap(~column, scales = "free") +
+  labs(title = "Density for C1 to C14 vs Fraud / Legit",
+       subtitle = "Value <= 0 removed for log scale",
+       x = "values",
+       y = "Density")
+```
+
+#La relation entre les Vxx (V12-V50) et la variable cible
+```{r}
+data1 %>%
+  select(isFraud, V12:V50) %>%
+  gather(column, value, -isFraud) %>%
+  filter(value > 0) %>%  
+  ggplot() +
+  geom_density(aes(value, color = as.factor(isFraud), fill = as.factor(isFraud)), alpha = 0.5) +
+  scale_x_log10() +
+  facet_wrap(~column, scales = "free") +
+  labs(title = "Density for V12 to V50 vs Fraud / Legit",
+       subtitle = "Value <= 0 removed for log scale",
+       x = "values",
+       y = "Density")
+```
+#V51-V89
+```{r}
+data1 %>%
+  select(isFraud, V51:V89) %>%
+  gather(column, value, -isFraud) %>%
+  filter(value > 0) %>%  
+  ggplot() +
+  geom_density(aes(value, color = as.factor(isFraud), fill = as.factor(isFraud)), alpha = 0.5) +
+  scale_x_log10() +
+  facet_wrap(~column, scales = "free") +
+  labs(title = "Density for V51 to V89 vs Fraud / Legit",
+       subtitle = "Value <= 0 removed for log scale",
+       x = "values",
+       y = "Density")
+```
+
+#V90-V128
+```{r}
+data1 %>%
+  select(isFraud, V90:V128) %>%
+  gather(column, value, -isFraud) %>%
+  filter(value > 0) %>%  
+  ggplot() +
+  geom_density(aes(value, color = as.factor(isFraud), fill = as.factor(isFraud)), alpha = 0.5) +
+  scale_x_log10() +
+  facet_wrap(~column, scales = "free") +
+  labs(title = "Density for V90 to V128 vs Fraud / Legit",
+       subtitle = "Value <= 0 removed for log scale",
+       x = "values",
+       y = "Density")
+```
+#V129-V137
+```{r}
+data1 %>%
+  select(isFraud, V129:V137) %>%
+  gather(column, value, -isFraud) %>%
+  filter(value > 0) %>%  
+  ggplot() +
+  geom_density(aes(value, color = as.factor(isFraud), fill = as.factor(isFraud)), alpha = 0.5) +
+  scale_x_log10() +
+  facet_wrap(~column, scales = "free") +
+  labs(title = "Density for V128 to V137 vs Fraud / Legit",
+       subtitle = "Value <= 0 removed for log scale",
+       x = "values",
+       y = "Density")
+```
+#V279-V321
+```{r}
+data1 %>%
+  select(isFraud, V279:V321) %>%
+  gather(column, value, -isFraud) %>%
+  filter(value > 0) %>%  
+  ggplot() +
+  geom_density(aes(value, color = as.factor(isFraud), fill = as.factor(isFraud)), alpha = 0.5) +
+  scale_x_log10() +
+  facet_wrap(~column, scales = "free") +
+  labs(title = "Density for V279 to V321 vs Fraud / Legit",
+       subtitle = "Value <= 0 removed for log scale",
+       x = "values",
+       y = "Density")
+```
+## Now dealing with missing values
+#let's remmember how much we have still of na for the varibles
+```{r}
+missing_rate1 <- colMeans(is.na(data1))
+missing_rate1 %>% sort(decreasing=T) %>% head(100) %>% print
+```
+####Data processing 
+#Préparation de la base train
+#un tableau qui regroupe toute les informations concernant la base train 
+```{r}
+write.csv(data1, "output_file.csv", row.names = FALSE)
+```
+#Data processing 
+#Préparation de la base train
+```{r}
+set.seed(2001)
+data_split <- initial_split(data1, prop = 0.75, strata = isFraud)
+train_data <- training(data_split)
+test_data <- testing(data_split)
+```
+#un tableau qui regroupe toute les informations concernant la base train 
+```{r}
+num_obs <- dim(train_data)[1]
+num_vars_total <- dim(train_data)[2]
+num_vars_numeric <- sum(sapply(train_data, is.numeric))
+num_vars_non_numeric <- num_vars_total - num_vars_numeric
+data.frame(
+  "Nombre d'observations" = num_obs,
+  "Nombre de variables" = num_vars_total,
+  "Nombre de variables numériques" = num_vars_numeric,
+  "Nombre de variables non numériques" = num_vars_non_numeric
+)
+```
+#un tableau qui regroupe toute les informations concernant la base train
+```{r}
+num_obs <- dim(test_data)[1]
+num_vars_total <- dim(test_data)[2]
+num_vars_numeric <- sum(sapply(test_data, is.numeric))
+num_vars_non_numeric <- num_vars_total - num_vars_numeric
+data.frame(
+  "Nombre d'observations" = num_obs,
+  "Nombre de variables" = num_vars_total,
+  "Nombre de variables numériques" = num_vars_numeric,
+  "Nombre de variables non numériques" = num_vars_non_numeric
+)
+```
+# Exclude TransactionID and TransactionDT from the training data
+```{r}
+train_data <- train_data %>%
+  select(-TransactionID, -TransactionDT, -real_datetime, -date)
+```
+## validation croisée
+```{r}
+fraudnev<- vfold_cv(train_data, v= 3, strata = isFraud)
+fraudnev
+```
+## applying receipies on the data
+# Create a recipe
+```{r}
+recipe_obj <- recipe(isFraud ~ ., data = train_data) %>%
+  step_mutate(M6 = as.factor(M6)) %>%
+  step_impute_mode(M6) %>%
+  step_impute_mean(all_numeric_predictors()) %>% 
+  step_impute_mode(all_nominal_predictors()) %>%
+  step_zv(all_numeric_predictors()) %>% 
+  step_corr(all_numeric_predictors(), threshold = 0.8) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_mutate(isFraud = as.factor(isFraud)) %>% 
+  step_smote(isFraud, over_ratio = 1, neighbors = 100)
+```
+# random forest model specification
+```{r}
+rf_model <- rand_forest(
+  mtry = 5,           
+  trees = 500,           
+  min_n = 10, 
+) %>%
+set_mode("classification") %>%
+set_engine("ranger", importance = "impurity")
+```
+## Creation de workflow
+```{r}
+Fraudworkflow <- workflow() %>%
+  add_model(rf_model) %>%
+  add_recipe(recipe_obj)
+Fraudworkflow
+```
+## Création du calcule paral
+```{r}
+cores <- parallel::detectCores()
+cl <- makePSOCKcluster(cores - 1)
+registerDoParallel(cl)
+```
+
+## Fit the model
+```{r}
+final_fit <- Fraudworkflow %>%
+  fit(data = train_data)
+```
+## evaluting
+```{r}
+test_data <- test_data %>%
+  mutate(isFraud = as.factor(isFraud),
+         M6 = as.factor(M6))
+```
+##
+```{r}
+recipe_fit <- prep(recipe_obj, training = train_data)
+Train_data1 <- bake(recipe_fit, new_data = train_data)
+Test_data1 <- bake(recipe_fit, new_data = test_data)
+```
+## graphe
+```{r}
+ggplot(Train_data1, aes(x = isFraud)) +
+  geom_bar() +
+  labs(title = "Distribution of isFraud in Training Data After SMOTE", x = "isFraud", y = "Count")
+```
+
+## evaluating the model
+```{r}
+install.packages("vip")
+library(vip)
+rf_fit <- extract_fit_engine(final_fit)
+vip::vip(rf_fit$fit)
+```
+## graph of the smote
+```{r}
+
+```
+
+
+
+#pr_auc (precision recall auc) tidy models)
+
