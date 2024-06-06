@@ -1,0 +1,291 @@
+---
+title: "H2O machine Dev"
+author: "MEZIANE AHMED YACINE"
+date: "`r Sys.Date()`"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Les packages
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(tidyselect)
+library(MLmetrics)
+library(lightgbm)
+library(data.table)
+library(moments)
+library(moments)
+library(MLmetrics)
+library(ggthemes)
+library(ggmosaic)
+library(gridExtra)
+library(repr)
+library(data.table)
+library(fastDummies)
+library(tictoc)
+library(naniar)
+library(DataExplorer)
+library(lubridate)
+library(patchwork)
+library(corrplot)
+library(kableExtra)
+library(themis)
+library(doParallel)
+library(DMwR2)
+library(h2o)
+```
+###Initialize H2O
+```{r}
+h2o.init()
+```
+## upload data
+```{r}
+train_iden <- read_csv("/Users/macmo/Desktop/Mémoire/Base de donnée/ieee-fraud-detection/train_identity.csv")
+train_trans <- read_csv("/Users/macmo/Desktop/Mémoire/Base de donnée/ieee-fraud-detection/train_transaction.csv")
+```
+#creating full data
+```{r}
+data<- train_trans  %>% 
+  left_join(train_iden,by="TransactionID")
+rm(train_iden,train_trans)
+```
+## features engeniring 
+```{r}
+data <- data %>%
+  mutate(TransactionAmt_Log = log1p(TransactionAmt),
+         TransactionAmt_to_mean_card1 = TransactionAmt / ave(TransactionAmt, card1, FUN = mean),
+         TransactionAmt_to_mean_card4 = TransactionAmt / ave(TransactionAmt, card4, FUN = mean))
+```
+
+#TransactionDT
+```{r}
+reference_date <- as.POSIXct("2017-12-01 00:00:00", tz = "UTC")
+
+timedelta <- as.difftime(data$TransactionDT, units = "secs")
+
+real_datetime <- reference_date + timedelta
+
+data$real_datetime <- real_datetime
+```
+#Date (Trying to understand the whole thing)
+```{r}
+library(lubridate)
+train_dt <- data$real_datetime
+unique(wday(train_dt))
+```
+
+#
+```{r}
+data$date <- train_dt
+data$day <- wday(train_dt)
+```
+## understand and remove variables with more than 50% of missing values
+```{r}
+missing_rate <- colMeans(is.na(data))
+missing_rate %>% sort(decreasing=T) %>% head(20) %>% print
+vars_to_remove <- names(missing_rate[missing_rate > 0.50])
+data1 <- data %>% select(-all_of(vars_to_remove))
+```
+## Split the data into training and validation sets
+```{r}
+set.seed(2001)
+data_split <- initial_split(data1, prop = 0.75, strata = isFraud)
+train_data <- training(data_split)
+test_data <- testing(data_split)
+```
+## Exclude TransactionID and TransactionDT from the training data
+```{r}
+train_data <- train_data %>%
+  select(-TransactionID, -TransactionDT, -real_datetime, -date)
+```
+## recipe
+```{r}
+recipe_obj <- recipe(isFraud ~ ., data = train_data) %>%
+  step_mutate(M6 = as.factor(M6)) %>%
+  step_impute_mode(M6) %>%
+  step_impute_mean(all_numeric_predictors()) %>% 
+  step_impute_mode(all_nominal_predictors()) %>%
+  step_nzv(all_numeric_predictors()) %>% 
+  step_corr(all_numeric_predictors(), threshold = 0.9) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_mutate(isFraud = as.factor(isFraud)) %>% 
+  step_upsample(over_ratio = 1)
+```
+
+## prep
+```{r}
+recipe_fit <- prep(recipe_obj, training = train_data)
+```
+## bake the new data
+```{r}
+Train_data1 <- bake(recipe_fit, new_data = train_data)
+test_data1 <- bake(recipe_fit, new_data = test_data)
+```
+#Define the target and features
+```{r}
+target <- "isFraud"
+features <- setdiff(names(Train_data1), target)
+```
+## Convert to H2O frames
+```{r}
+train_h2o <- as.h2o(Train_data1)
+valid_h2o <- as.h2o(test_data1)
+```
+# impute numerical data
+```{r}
+for (col in numeric_cols) {
+  h2o.impute(train_h2o, col, method = "mean")
+}
+```
+
+### Define the model
+```{r}
+rf_model <- h2o.randomForest(
+  x = features1,
+  y = target1,
+  training_frame = train_h2o1,
+  validation_frame = valid_h2o1,
+  ntrees = 1500,
+  max_depth = 10,
+  min_rows = 600,
+  stopping_rounds = 5,
+  score_tree_interval = 10,
+  balance_classes = TRUE,
+  stopping_metric = "AUC",
+  stopping_tolerance = 0.001,
+  max_runtime_secs = 500
+)
+```
+## prediction
+```{r}
+predictions <- h2o.predict(rf_model, valid_h2o)
+predictions
+```
+
+## confusion matrix
+```{r}
+h2o.confusionMatrix(rf_model, valid_h2o1)
+```
+
+
+## performance model 
+```{r}
+h2o.confusionMatrix(rf_model, train_h2o1)
+```
+# PR AUC
+```{r}
+perf1 <- h2o.performance(rf_model, valid_h2o1)
+h2o.auc(perf1)
+h2o.aucpr(perf1)
+perf <- h2o.performance(rf_model, train_h2o1)
+h2o.aucpr(perf)
+h2o.auc(perf)
+```
+## AUC ROC
+```{r}
+h2o.aucpr(perf)
+h2o.auc(perf1)
+```
+##
+```{r}
+h2o.accuracy(perf,threshold =0.391764397834652)
+h2o.precision(perf, threshold = 0.391764397834652)
+h2o.recall(perf, threshold = 0.391764397834652)
+h2o.specificity(perf,threshold = 0.391764397834652)
+h2o.mean_per_class_accuracy(perf,threshold = 0.391764397834652)
+h2o.mean_per_class_error(perf)
+```
+
+
+## gainlift
+```{r}
+h2o.gains_lift(rf_model, valid_h2o)
+```
+## plot
+```{r}
+metrics <- as.data.frame(h2o.metric(perf))
+metrics1 <- as.data.frame(h2o.metric(perf1))
+valid_df <- as.data.frame(valid_h2o1)
+valid_df1 <- as.data.frame(train_h2o1)
+positive_class_proportion <- sum(valid_df$isFraud == 1) / nrow(valid_df1)
+metrics %>% ggplot(aes(x = recall, y = precision)) +
+  geom_line(color = "darkred", size = 1) +
+  geom_hline(yintercept = positive_class_proportion + 0.05, linetype = "dashed", color = "blue", size = 1) +
+  annotate("text", x = 0.5, y = positive_class_proportion, label = "No Skill", color = "blue") +
+  labs(title = "Precision-Recall Curve",
+       x = "Recall",
+       y = "Precision") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+    theme_minimal()
+```
+##
+# Plot AUC ROC
+```{r}
+plot(perf)
+```
+
+# Convert to data frame for ggplot2
+```{r}
+pr_curve_df <- as.data.frame(pr_curve)
+```
+# Plot the most important variables
+```{r}
+h2o.varimp(rf_model)
+h2o.varimp_plot(rf_model)
+```
+## pr_auc matrix
+```{r}
+h2o.auc(perf1)
+h2o.aucpr(perf1)
+h2o.aucpr(rf_model)
+```
+## VALID H2O
+# Statistique
+```{r}
+h2o.accuracy(perf1,threshold =0.410004894012808)
+h2o.precision(perf1,threshold =0.410004894012808)
+h2o.recall(perf1,threshold =0.410004894012808)
+h2o.specificity(perf1,threshold =0.410004894012808)
+h2o.mean_per_class_accuracy(perf1,threshold =0.410004894012808)
+h2o.mean_per_class_error(perf1)
+```
+##PR_AUC
+```{r}
+positive_class_proportion <- sum(valid_df$isFraud == 1) / nrow(valid_df1)
+metrics1 %>% ggplot(aes(x = recall, y = precision)) +
+  geom_line(color = "darkred", size = 1) +
+  geom_hline(yintercept = positive_class_proportion, linetype = "dashed", color = "blue", size = 1) +
+  annotate("text", x = 0.5, y = positive_class_proportion + 0.02, label = "No Skill", color = "blue") +
+  labs(title = "Precision-Recall Curve",
+       x = "Recall",
+       y = "Precision") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme_minimal()
+```
+
+```{r}
+pr_auc <- h2o.auc(pr_auc = TRUE, perf2)
+print(paste("PR AUC:", pr_auc))
+```
+## plot auc train
+```{r}
+plot(perf1)
+```
+## test
+```{r}
+plot(perf2)
+h2o.aucpr(perf2)
+h2o.auc(perf2)
+```
+## importance variable
+```{r}
+immp<- h2o.varimp(rf_model)
+head(immp, 20)
+```
+
