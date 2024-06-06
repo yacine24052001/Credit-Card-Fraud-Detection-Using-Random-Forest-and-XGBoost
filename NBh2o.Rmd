@@ -1,0 +1,301 @@
+---
+title: "NBh2o"
+author: "MEZIANE AHMED YACINE"
+date: "`r Sys.Date()`"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Les packages
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(tidyselect)
+library(MLmetrics)
+library(lightgbm)
+library(data.table)
+library(moments)
+library(moments)
+library(MLmetrics)
+library(ggthemes)
+library(ggmosaic)
+library(gridExtra)
+library(repr)
+library(data.table)
+library(fastDummies)
+library(tictoc)
+library(naniar)
+library(DataExplorer)
+library(lubridate)
+library(patchwork)
+library(corrplot)
+library(kableExtra)
+library(themis)
+library(doParallel)
+library(DMwR2)
+library(h2o)
+library(agua)
+```
+###Initialize H2O
+```{r}
+h2o.init()
+```
+## upload data
+```{r}
+train_iden1 <- read_csv("/Users/macmo/Desktop/Mémoire/Base de donnée/ieee-fraud-detection/train_identity.csv")
+train_trans1 <- read_csv("/Users/macmo/Desktop/Mémoire/Base de donnée/ieee-fraud-detection/train_transaction.csv")
+```
+#creating full data
+```{r}
+data1<- train_trans1  %>% 
+  left_join(train_iden1,by="TransactionID")
+rm(train_iden1,train_trans1)
+```
+## Feautures engenirieng
+# Interaction Features
+```{r}
+data1 <- data1 %>%
+  mutate(TransactionAmt_Log = log1p(TransactionAmt),
+         TransactionAmt_to_mean_card1 = TransactionAmt / ave(TransactionAmt, card1, FUN = mean),
+         TransactionAmt_to_mean_card4 = TransactionAmt / ave(TransactionAmt, card4, FUN = mean))
+
+```
+
+#TransactionDT
+```{r}
+reference_date1 <- as.POSIXct("2017-12-01 00:00:00", tz = "UTC")
+
+timedelta1 <- as.difftime(data1$TransactionDT, units = "secs")
+
+real_datetime1 <- reference_date1 + timedelta1
+
+data1$real_datetime1 <- real_datetime1
+```
+#Date (Trying to understand the whole thing)
+```{r}
+library(lubridate)
+train_dt1 <- data1$real_datetime1
+unique(wday(train_dt1))
+```
+#
+```{r}
+data1$date <- train_dt1
+data1$day <- wday(train_dt1)
+```
+
+## understand and remove variables with more than 50% of missing values
+```{r}
+missing_rate1 <- colMeans(is.na(data1))
+missing_rate1 %>% sort(decreasing=T) %>% head(20) %>% print
+vars_to_remove1 <- names(missing_rate1[missing_rate1 > 0.50])
+data2 <- data1 %>% select(-all_of(vars_to_remove1))
+```
+## Split the data into training and validation sets
+```{r}
+set.seed(2001)
+
+data2 <- data2 %>% 
+  mutate(isFraud =as.factor(isFraud))
+
+data_split1 <- initial_split(data2, prop = 0.75, strata = isFraud)
+train_data1 <- training(data_split1)
+test_data1 <- testing(data_split1)
+```
+## recipe
+```{r}
+recipe_obj1 <- recipe(isFraud ~ ., data = train_data1) %>%
+  step_mutate(M6 = as.factor(M6)) %>%
+  step_select(-TransactionID, -TransactionDT, -real_datetime1, -date) %>%
+  step_impute_mode(M6) %>%
+  step_impute_mean(all_numeric_predictors()) %>%
+  step_impute_mode(all_nominal_predictors()) %>%
+  step_nzv(all_numeric_predictors()) %>%
+  step_corr(all_numeric_predictors(), threshold = 0.9) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_smote(isFraud,neighbors = 10,over_ratio = 0.5)
+
+recipe_obj1
+```
+```{r}
+Train_data2 <- recipe_obj1 %>% prep(training = train_data1) %>% juice()
+Test_data2 <- recipe_obj1 %>% prep(training = test_data1) %>% juice()
+```
+
+## prep
+```{r}
+# recipe_fit1 <- prep(recipe_obj1, training = train_data1)
+# 
+# recipe_fit1
+```
+## bake the new data
+```{r}
+# Train_data2 <- bake(recipe_fit1, new_data = train_data1)
+# test_data2 <- bake(recipe_fit1, new_data = test_data1)
+```
+#Define the target and features
+```{r}
+target1 <- "isFraud"
+features1 <- setdiff(names(Train_data2), target1)
+```
+## Convert to H2O frames
+```{r}
+train_h2o1 <- as.h2o(Train_data2)
+valid_h2o1 <- as.h2o(Test_data2)
+```
+### Define the model
+```{r}
+xg_model <- h2o.xgboost(
+  x = features1,
+  y = target1,
+  training_frame = train_h2o1,
+  validation_frame = valid_h2o1,
+  seed = 2001,
+  stopping_metric = "AUC",
+  stopping_rounds = 5,
+  stopping_tolerance = 0.001,
+  sample_rate = 1,
+  learn_rate = 0.4,
+  max_runtime_secs = 600,
+   ntrees = 2700,
+  max_depth = 10,
+  min_rows = 600,
+  score_each_iteration = TRUE
+)
+```
+## Calculate performance metrics
+```{r}
+perf4 <- h2o.performance(xg_model, newdata = valid_h2o1)
+perf3 <- h2o.performance(xg_model, newdata = train_h2o1)
+h2o.auc(xg_model)
+h2o.aucpr(xg_model)
+h2o.aucpr(perf3)
+h2o.aucpr(perf4)
+h2o.auc(perf3)
+h2o.auc(perf4)
+```
+## confusion matrix pour train
+```{r}
+h2o.confusionMatrix(xg_model, train_h2o1)
+```
+
+
+
+## confusion matrix pour test
+```{r}
+h2o.confusionMatrix(xg_model, valid_h2o1)
+h2o.confusionMatrix()
+```
+# Plot the most important variables
+```{r}
+h2o.varimp(xg_model)
+h2o.varimp_plot(xg_model)
+```
+## 
+```{r}
+h2o.accuracy(perf3, threshold = 0.423992688531306)
+h2o.precision(perf3, threshold = 0.423992688531306)
+h2o.recall(perf3, threshold = 0.423992688531306)
+h2o.specificity(perf3, threshold = 0.423992688531306)
+h2o.mean_per_class_accuracy(perf3, threshold = 0.423992688531306)
+h2o.mean_per_class_error(perf3)
+```
+## plot TRAIN
+```{r}
+metrics3 <- as.data.frame(h2o.metric(perf3))
+metrics4 <- as.data.frame(h2o.metric(perf4))
+valid_df3 <- as.data.frame(valid_h2o1)
+valid_df4 <- as.data.frame(train_h2o1)
+
+positive_class_proportion <- sum(valid_df3$isFraud == 1) / nrow(valid_df4)
+metrics3 %>% ggplot(aes(x = recall, y = precision)) +
+  geom_line(color = "darkred", size = 1) +
+  geom_hline(yintercept = positive_class_proportion +0.035, linetype = "dashed", color = "blue", size = 1) +
+  annotate("text", x = 0.5, y = positive_class_proportion, label = "No Skill", color = "blue") +
+  labs(title = "Precision-Recall Curve",
+       x = "Recall",
+       y = "Precision") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+    theme_minimal()
+```
+
+
+## PLOT TEST
+```{r}
+positive_class_proportion <- sum(valid_df4$isFraud == 1) / nrow(valid_df4)
+metrics4 %>% ggplot(aes(x = recall, y = precision)) +
+  geom_line(color = "darkred", size = 1) +
+  geom_hline(yintercept = positive_class_proportion, linetype = "dashed", color = "blue", size = 1) +
+  annotate("text", x = 0.5, y = positive_class_proportion, label = "No Skill", color = "blue") +
+  labs(title = "Precision-Recall Curve",
+       x = "Recall",
+       y = "Precision") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+    theme_minimal()
+```
+## statistique 
+```{r}
+h2o.accuracy(perf4, thresholds =0.997679613090045)
+h2o.precision(perf4, threshold = 0.997679613090045)
+h2o.recall(perf4, threshold = 0.997679613090045)
+h2o.specificity(perf4,threshold = 0.997679613090045)
+h2o.mean_per_class_accuracy(perf4,threshold = 0.999997324553075)
+h2o.mean_per_class_error(perf4)
+```
+## statistique test
+```{r}
+h2o.accuracy(perf3, thresholds = 0.423581700772047)
+h2o.precision(perf3, threshold = 0.423581700772047)
+h2o.recall(perf3, threshold = 0.423581700772047)
+h2o.specificity(perf3,threshold = 0.423581700772047)
+h2o.mean_per_class_accuracy(perf3,threshold = 0.423581700772047)
+h2o.mean_per_class_error(perf3)
+```
+## auc_ pr & auc
+```{r}
+h2o.auc(xg_model)
+h2o.aucpr(xg_model)
+```
+## plot train
+```{r}
+plot(perf4)
+```
+
+## test
+```{r}
+plot(perf3)
+```
+## variable importance 
+```{r}
+imp <- h2o.varimp(xg_model)
+head(imp, 20)
+```
+## plot
+```{r}
+h2o.varimp_plot(xg_model)
+```
+##
+```{r}
+pred_train <- h2o.predict(xg_model, train_h2o1)
+pred_test <- h2o.predict(xg_model, valid_h2o1)
+```
+
+## graph after unballanced 
+```{r}
+ggplot(data = Train_data2, aes(x = factor(isFraud), fill = factor(isFraud))) +
+  geom_bar(aes(y = (..count..)/sum(..count..)),position = "dodge",alpha=0.7) + 
+  geom_text(aes(y = (..count..)/sum(..count..), 
+                label = paste0(..count..," ","  (",round(prop.table(..count..) * 100,2), '%',")")), 
+            stat = 'count', 
+            position = position_dodge(.9), 
+            size=2.5,vjust = -0.3) + 
+  scale_fill_manual("",values=c("#ADD8E6","#FFA07A"),labels=c("No Fraud","Fraud")) +
+  labs(x = "", y = '') +
+  scale_y_continuous(labels = scales::percent) +
+  theme(legend.position = "bottom", 
+        axis.text=element_blank(),
+        axis.ticks = element_blank())
+```
+
