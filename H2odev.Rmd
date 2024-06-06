@@ -1,6 +1,6 @@
 ---
 title: "H2O machine Dev"
-author: "MEZIANE AHMED YACINE"
+author: "MEZIANE YACINE"
 date: "`r Sys.Date()`"
 output: word_document
 ---
@@ -11,31 +11,6 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## Les packages
 ```{r}
-library(tidyverse)
-library(tidymodels)
-library(tidyselect)
-library(MLmetrics)
-library(lightgbm)
-library(data.table)
-library(moments)
-library(moments)
-library(MLmetrics)
-library(ggthemes)
-library(ggmosaic)
-library(gridExtra)
-library(repr)
-library(data.table)
-library(fastDummies)
-library(tictoc)
-library(naniar)
-library(DataExplorer)
-library(lubridate)
-library(patchwork)
-library(corrplot)
-library(kableExtra)
-library(themis)
-library(doParallel)
-library(DMwR2)
 library(h2o)
 ```
 ###Initialize H2O
